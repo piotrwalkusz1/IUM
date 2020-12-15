@@ -51,14 +51,32 @@ Future<void> removeProduct(GoogleSignInAccount _currentUser, String _basicToken,
       headers: {'Authorization': token, "Content-Type": "application/json"});
 }
 
-Future<void> decreaseQuantity(GoogleSignInAccount _currentUser,
+Future<bool> decreaseQuantity(GoogleSignInAccount _currentUser,
     String _basicToken, String productId, int delta) async {
   String token = await _getToken(_currentUser, _basicToken);
 
-  await http.post(
+  http.Response response = await http.post(
       'http://192.168.178.34:8080/api/products/$productId/quantity/decrease',
       headers: {'Authorization': token, "Content-Type": "application/json"},
       body: delta.toString());
+
+  if (response.statusCode == 200) {
+    return true;
+  } else {
+    return false;
+  }
+}
+
+Future<String> synchronizeProducts(GoogleSignInAccount _currentUser,
+    String _basicToken, List<Map> commands) async {
+  String token = await _getToken(_currentUser, _basicToken);
+
+  http.Response response = await http.post(
+      'http://192.168.178.34:8080/api/products/synchronize',
+      headers: {'Authorization': token, "Content-Type": "application/json"},
+      body: jsonEncode({"commands": commands}));
+
+  return response.body;
 }
 
 Future<String> _getToken(

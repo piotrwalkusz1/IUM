@@ -40,6 +40,10 @@ class _AppState extends State<App> {
   String _login;
   String _password;
   bool _isManager = false;
+  String _decreasePageError = "";
+  List<Map> _commands = new List();
+  String _synchronizationErrors = "";
+  int nextProductId = 0;
 
   @override
   void initState() {
@@ -145,12 +149,20 @@ class _AppState extends State<App> {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.start,
         children: [
-          RaisedButton(child: const Text('ODŚWIEŻ'), onPressed: getProducts),
+          RaisedButton(
+              child: const Text('SYNCHRONIZUJ'),
+              onPressed: synchronizeProductsAndFetch),
           RaisedButton(
               child: const Text('UTWÓRZ'), onPressed: goToCreateProductPage)
         ],
       ),
     )));
+
+    if (_synchronizationErrors.isNotEmpty) {
+      children.add(Expanded(
+          flex: 2,
+          child: SingleChildScrollView(child: Text(_synchronizationErrors))));
+    }
 
     if (_products != null) {
       List<Widget> productList =
@@ -296,6 +308,7 @@ class _AppState extends State<App> {
                 } catch (error) {}
               },
             ),
+            Text(_decreasePageError),
             Expanded(
                 child: ConstrainedBox(
               constraints: const BoxConstraints.expand(),
@@ -315,13 +328,55 @@ class _AppState extends State<App> {
   }
 
   void handleIncrease() {
-    increaseQuantity(_currentUser, _basicToken, _product.id, _product.quantity)
-        .whenComplete(() => goToProductsPage());
+    Product productToUpdate =
+        _products.firstWhere((element) => element.id == _product.id);
+
+    setState(() {
+      if (_product.id.startsWith("-")) {
+        Map command =
+            _commands.firstWhere((element) => element["type"] == "Add");
+        command["quantity"] += _product.quantity;
+      } else {
+        _commands.add({
+          "type": "Increase",
+          "productId": _product.id,
+          "delta": _product.quantity
+        });
+      }
+
+      productToUpdate.quantity += _product.quantity;
+    });
+
+    goToProductsPage();
   }
 
   void handleDecrease() {
-    decreaseQuantity(_currentUser, _basicToken, _product.id, _product.quantity)
-        .whenComplete(() => goToProductsPage());
+    Product productToUpdate =
+        _products.firstWhere((element) => element.id == _product.id);
+
+    if (productToUpdate.quantity < _product.quantity) {
+      setState(() {
+        _decreasePageError = "Niedostateczna ilość produktów";
+      });
+      return;
+    }
+
+    setState(() {
+      if (_product.id.startsWith("-")) {
+        Map command =
+            _commands.firstWhere((element) => element["type"] == "Add");
+        command["quantity"] -= _product.quantity;
+      } else {
+        _commands.add({
+          "type": "Decrease",
+          "productId": _product.id,
+          "delta": _product.quantity
+        });
+      }
+      productToUpdate.quantity -= _product.quantity;
+    });
+
+    goToProductsPage();
   }
 
   Widget _buildCreateProductPage() {
@@ -375,17 +430,76 @@ class _AppState extends State<App> {
   }
 
   void _handleSaveProduct() {
-    saveProduct(_currentUser, _basicToken, _product);
+    Product productToUpdate =
+        _products.firstWhere((element) => element.id == _product.id);
+
+    setState(() {
+      if (productToUpdate.id.startsWith("-")) {
+        Map command =
+            _commands.firstWhere((element) => element["type"] == "Add");
+        command["data"]["name"] = _product.name;
+        command["data"]["manufacturer"] = _product.manufacturer;
+        command["data"]["price"] = _product.price;
+      } else {
+        _commands.removeWhere((element) =>
+            element["type"] == "Update" &&
+            element["data"]["id"] == _product.id);
+        _commands.add({
+          "type": "Update",
+          "data": {
+            "id": _product.id,
+            "name": _product.name,
+            "manufacturer": _product.manufacturer,
+            "price": _product.price
+          }
+        });
+      }
+
+      productToUpdate.name = _product.name;
+      productToUpdate.manufacturer = _product.manufacturer;
+      productToUpdate.price = _product.price;
+    });
   }
 
   void _handleCreateProduct() {
-    createProduct(_currentUser, _basicToken, _product)
-        .then((value) => goToProductsPage());
+    setState(() {
+      _commands.add({
+        "type": "Add",
+        "data": {
+          "name": _product.name,
+          "manufacturer": _product.manufacturer,
+          "price": _product.price
+        },
+        "quantity": 0
+      });
+      _products.add(Product(
+        id: "-" + (nextProductId++).toString(),
+        name: _product.name,
+        manufacturer: _product.manufacturer,
+        price: _product.price,
+        quantity: 0,
+      ));
+    });
+
+    goToProductsPage();
   }
 
   void _handleRemoveProduct() {
-    removeProduct(_currentUser, _basicToken, _product.id)
-        .whenComplete(() => goToProductsPage());
+    Product productToUpdate =
+        _products.firstWhere((element) => element.id == _product.id);
+
+    setState(() {
+      _products.removeWhere((element) => element.id == _product.id);
+
+      if (productToUpdate.id.startsWith("-")) {
+        _commands.removeWhere((element) =>
+            element["type"] == "Add" && element["data"]["id"] == _product.id);
+      } else {
+        _commands.add({"productId": _product.id});
+      }
+    });
+
+    goToProductsPage();
   }
 
   Widget _buildProductRow(Product product) {
@@ -399,7 +513,6 @@ class _AppState extends State<App> {
     setState(() {
       _currentPage = Pages.Products;
     });
-    getProducts();
   }
 
   void goToProductPage(Product product) {
@@ -428,13 +541,24 @@ class _AppState extends State<App> {
     setState(() {
       _currentPage = Pages.Decrease;
       _product.quantity = 0;
+      _decreasePageError = "";
     });
   }
 
-  void getProducts() {
-    fetchProducts(_currentUser, _basicToken).then((products) => setState(() {
+  void synchronizeProductsAndFetch() {
+    synchronizeProducts(_currentUser, _basicToken, _commands)
+        .then((synchronizationResponse) {
+      setState(() {
+        _commands = List();
+        _synchronizationErrors = synchronizationResponse;
+      });
+
+      return fetchProducts(_currentUser, _basicToken).then((products) {
+        setState(() {
           _products = products;
-        }));
+        });
+      });
+    });
   }
 
   Widget _buildSignInPage() {
