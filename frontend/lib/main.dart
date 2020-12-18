@@ -495,7 +495,7 @@ class _AppState extends State<App> {
         _commands.removeWhere((element) =>
             element["type"] == "Add" && element["data"]["id"] == _product.id);
       } else {
-        _commands.add({"productId": _product.id});
+        _commands.add({"type": "Remove", "productId": _product.id});
       }
     });
 
